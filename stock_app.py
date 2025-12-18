@@ -4,7 +4,7 @@ import pandas as pd
 import requests
 import numpy as np
 import re
-import altair as alt # 차트 색상 제어를 위해 추가
+import altair as alt
 
 # -----------------------------------------------------------
 # [1] 페이지 및 스타일 설정
@@ -13,7 +13,7 @@ st.set_page_config(page_title="적정주가 산출 계산기", page_icon="🧮",
 
 st.markdown("""
 <style>
-    /* 폰트 및 기본 스타일 */
+    /* 기본 폰트 설정 */
     html, body, [class*="css"] {
         font-family: 'Pretendard', sans-serif;
         font-size: 1.05rem;
@@ -21,14 +21,13 @@ st.markdown("""
     
     /* 제목 스타일 */
     h1 { font-size: 2.0rem !important; font-weight: 800 !important; color: #111; }
-    h3 { font-size: 1.5rem !important; font-weight: 700 !important; margin-top: 20px !important; }
     
     /* 리포트 헤더 (배경색 추가) */
     .report-header {
         background-color: #f1f3f5;
         padding: 12px 20px;
         border-radius: 8px;
-        font-size: 1.3rem;
+        font-size: 1.2rem;
         font-weight: 700;
         color: #343a40;
         margin-bottom: 15px;
@@ -73,16 +72,57 @@ st.markdown("""
         font-size: 0.9rem;
         color: #555;
     }
-    
-    /* 최종 결론 테이블 폰트 키우기 */
-    .big-table {
-        font-size: 1.2rem !important;
+
+    /* 최종 결과 테이블 스타일 */
+    .final-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 1.1rem;
+        margin-bottom: 20px;
+    }
+    .final-table th {
+        background-color: #4c6ef5;
+        color: white;
+        padding: 12px;
+        text-align: center;
+        border: 1px solid #ddd;
+    }
+    .final-table td {
+        padding: 10px;
+        text-align: center;
+        border: 1px solid #ddd;
+        font-weight: 600;
+    }
+    .final-table tr:nth-child(even) {background-color: #f2f2f2;}
+
+    /* 면책 조항 박스 */
+    .disclaimer-box {
+        background-color: #fff3cd;
+        border: 1px solid #ffeeba;
+        padding: 20px;
+        border-radius: 10px;
+        font-size: 1.0rem;
+        color: #856404;
+        line-height: 1.6;
+        margin-top: 30px;
     }
 </style>
 """, unsafe_allow_html=True)
 
 st.title("🧮 적정주가 산출 계산기")
 st.caption("Last Updated : 2025. 12 | Powered by info Nomad")
+
+# -----------------------------------------------------------
+# [1] 수정사항 반영: 설명 부분 (expander) 복구
+# -----------------------------------------------------------
+with st.expander("📘 분석 모델 및 데이터 기준 설명 (열기)", expanded=False):
+    st.markdown("""
+    - **데이터 기준:** 네이버 금융의 **'최근 연간 실적'**만 사용합니다. (분기 데이터 자동 제외)
+    - **예상치(E) 활용:** 증권사 컨센서스(예상치)가 있는 경우 미래 가치를 우선 반영합니다.
+    - **S-RIM:** 자산가치(BPS) + 초과이익가치(ROE). (이익이 꾸준한 우량주용)
+    - **벤저민 그레이엄:** BPS와 EPS의 기하평균. (자산가치 중시)
+    - **피터 린치 (PEG):** 연간 EPS 성장률(CAGR) 기반. (성장주용)
+    """)
 
 # -----------------------------------------------------------
 # [2] 기능: 주식 리스트 및 데이터 크롤링
@@ -182,8 +222,8 @@ def get_stock_analysis(code):
         except:
             eps_growth_rate = 0
 
-        # 주가 정보 (전일비 계산을 위해 기간 넉넉히)
-        df_price = fdr.DataReader(code) # 전체 기간
+        # 주가 정보
+        df_price = fdr.DataReader(code)
         if df_price.empty: return None, "주가 정보 오류"
         
         current_price = df_price['Close'].iloc[-1]
@@ -210,7 +250,7 @@ def get_stock_analysis(code):
         return None, f"오류 발생: {str(e)}"
 
 # -----------------------------------------------------------
-# [3] 표 포맷팅 (단위 오류 수정: % 우선 적용)
+# [3] 표 포맷팅 (수정사항 반영: 영업이익률 % 단위 수정)
 # -----------------------------------------------------------
 def format_financial_table(df):
     formatted_df = df.copy()
@@ -225,7 +265,7 @@ def format_financial_table(df):
                 val_float = float(str(val).replace(',', ''))
                 idx_clean = idx.replace(' ', '') 
                 
-                # [수정] 순서 중요: '율'이 들어간 것을 먼저 체크하여 % 적용
+                # [중요 수정] '율'이 들어간 것을 가장 먼저 체크
                 if '율' in idx_clean or 'ROE' in idx_clean:
                     formatted_df.loc[idx, col] = f"{val_float:.2f} %"
                 elif '매출액' in idx_clean or '영업이익' in idx_clean or '당기순이익' in idx_clean:
@@ -241,7 +281,7 @@ def format_financial_table(df):
     return formatted_df
 
 # -----------------------------------------------------------
-# [4] 분석 인사이트 생성기
+# [4] 분석 인사이트 생성기 (HTML bold 적용)
 # -----------------------------------------------------------
 def get_analysis_comment(model_name, fair_value, current_price, required_return=None):
     if fair_value <= 0:
@@ -263,9 +303,8 @@ def get_analysis_comment(model_name, fair_value, current_price, required_return=
         return "적정 가치보다 <b>저렴한</b> 상태입니다."
 
 # -----------------------------------------------------------
-# [5] UI 구성: 상단 검색 및 설정 (모바일 최적화)
+# [5] UI 구성
 # -----------------------------------------------------------
-# 사이드바 대신 상단 Expander 사용
 with st.expander("🔍 종목 선택 및 설정 (여기를 클릭하여 종목을 검색하세요)", expanded=True):
     col_input1, col_input2 = st.columns([1, 1])
     
@@ -288,7 +327,7 @@ with st.expander("🔍 종목 선택 및 설정 (여기를 클릭하여 종목�
         )
         if "8.0%" in srim_option: default_k = 8.0
         elif "10.0%" in srim_option: default_k = 10.0
-        elif "4.0%" in srim_option: default_k = 4.0
+elif "4.0%" in srim_option: default_k = 4.0
         else: default_k = 8.0
         required_return = st.slider("요구수익률 상세 조정 (%)", 2.0, 20.0, default_k, 0.1)
 
@@ -320,7 +359,7 @@ if selected_stock:
         if data['eps'] > 0 and growth_cap > 0:
             peter_lynch = data['eps'] * growth_cap
 
-        # [헤더] 주가 표시 (색상 적용)
+        # [헤더] 주가 표시
         st.divider()
         st.subheader(f"🏢 {stock_name} ({data['code']})")
         
@@ -343,20 +382,20 @@ if selected_stock:
         display_df = format_financial_table(data['history_df'])
         st.dataframe(display_df, use_container_width=True)
         if data['is_estimate']:
-            st.info(f"💡 **참고:** '{data['target_year']}' 데이터는 증권사 **예상치(Consensus)**입니다.")
+            # 수정사항: 마크다운 ** 제거하고 HTML bold 적용
+            st.markdown(f"<div style='font-size:0.9rem; color:#555;'>💡 참고: '<b>{data['target_year']}</b>' 데이터는 증권사 <b>예상치(Consensus)</b>입니다.</div>", unsafe_allow_html=True)
 
         st.divider()
 
         # [섹션 2] 적정주가 리포트
         st.markdown(f"##### 2️⃣ 적정주가 산출 리포트 (기준: {data['target_year']})")
         
-        # 공통 스타일 함수 (제목 배경색 추가)
         def draw_report_card(title, inputs, result_value, formula, comment):
             st.markdown(f"<div class='report-header'>{title}</div>", unsafe_allow_html=True)
             c1, c2 = st.columns([1, 1.2])
             
             with c1:
-                # <b> 태그 사용으로 굵은 글씨 강제 적용
+                # 수정사항: $ 기호 제거
                 input_html = "".join([f"<div>• {k}: <b>{v}</b></div>" for k, v in inputs.items()])
                 st.markdown(f"""
                 <div class="metric-card">
@@ -382,32 +421,32 @@ if selected_stock:
             
             with st.expander("수식 보기"):
                 st.latex(formula)
-            st.write("") # 간격
+            st.write("") 
 
-        # S-RIM 출력
+        # S-RIM (수정: $ 기호 제거)
         srim_inputs = {
-            "BPS ($BPS$)": f"{data['bps']:,.0f}원",
-            "ROE ($ROE$)": f"{data['roe']}%",
-            "요구수익률 ($k$)": f"{required_return}%"
+            "BPS (BPS)": f"{data['bps']:,.0f}원",
+            "ROE (ROE)": f"{data['roe']}%",
+            "요구수익률 (k)": f"{required_return}%"
         }
         srim_comment = get_analysis_comment("S-RIM", srim, data['price'], required_return)
         draw_report_card("① S-RIM (사경인 모델)", srim_inputs, srim, 
                          r"BPS + \frac{BPS \times (ROE - k)}{k}", srim_comment)
 
-        # 그레이엄 출력
+        # 그레이엄 (수정: $ 기호 제거)
         graham_inputs = {
-            "EPS ($EPS$)": f"{data['eps']:,.0f}원",
-            "BPS ($BPS$)": f"{data['bps']:,.0f}원",
+            "EPS (EPS)": f"{data['eps']:,.0f}원",
+            "BPS (BPS)": f"{data['bps']:,.0f}원",
             "상수": "22.5"
         }
         graham_comment = get_analysis_comment("그레이엄", graham, data['price'])
         draw_report_card("② 벤저민 그레이엄 (NCAV)", graham_inputs, graham, 
                          r"\sqrt{22.5 \times EPS \times BPS}", graham_comment)
 
-        # 피터 린치 출력
+        # 피터 린치 (수정: $ 기호 제거)
         lynch_inputs = {
-            "EPS ($EPS$)": f"{data['eps']:,.0f}원",
-            "성장률 ($G$)": f"{data['eps_growth']:.1f}%",
+            "EPS (EPS)": f"{data['eps']:,.0f}원",
+            "성장률 (G)": f"{data['eps_growth']:.1f}%",
             "비고": "Max 30% 제한"
         }
         lynch_comment = get_analysis_comment("PEG", peter_lynch, data['price'])
@@ -416,45 +455,51 @@ if selected_stock:
 
         st.divider()
 
-        # [섹션 3] 최종 요약 (표 상단, 차트 하단)
+        # [섹션 3] 최종 요약 (수정: 표 디자인 개선, 차트 배치)
         st.markdown("##### 3️⃣ 최종 결론")
+        
         summary = pd.DataFrame({
             "모델": ["현재 주가", "S-RIM", "그레이엄", "피터 린치"],
             "가격": [data['price'], srim if srim > 0 else 0, graham if graham > 0 else 0, peter_lynch if peter_lynch > 0 else 0]
         })
         
-        # 테이블 스타일링 (글자 키우기)
+        # 1. 표 (HTML로 직접 그려서 이쁘게)
         summary_disp = summary.copy()
         summary_disp['가격'] = summary_disp['가격'].apply(lambda x: f"{x:,.0f}원" if x > 0 else "-")
         
-        st.markdown("###### 모델별 적정주가 비교")
-        # st.dataframe 대신 HTML Table을 직접 그려서 폰트 크기 제어
-        st.write(summary_disp.style.set_properties(**{'font-size': '1.2rem', 'text-align': 'center'}).to_html(), unsafe_allow_html=True)
+        # columns 사용: PC에선 옆으로, 모바일에선 위아래로
+        c_final1, c_final2 = st.columns([1, 1])
         
-        st.write("")
-        st.write("")
-        
-        # 차트 (색상 적용)
-        chart_data = summary[summary['가격'] > 0]
-        
-        # Altair 차트 사용 (색상 다르게)
-        chart = alt.Chart(chart_data).mark_bar().encode(
-            x=alt.X('모델', sort=None),
-            y='가격',
-            color=alt.Color('모델', legend=None, scale=alt.Scale(scheme='category10')), # 색상 다르게
-            tooltip=['모델', '가격']
-        ).properties(
-            height=400
-        )
-        st.altair_chart(chart, use_container_width=True)
+        with c_final1:
+            # HTML Table 생성
+            table_html = "<table class='final-table'><thead><tr><th>모델</th><th>적정 주가</th></tr></thead><tbody>"
+            for index, row in summary_disp.iterrows():
+                table_html += f"<tr><td>{row['모델']}</td><td>{row['가격']}</td></tr>"
+            table_html += "</tbody></table>"
+            st.markdown(table_html, unsafe_allow_html=True)
+            
+        with c_final2:
+            # 2. 차트 (항목별 색상 다르게)
+            chart_data = summary[summary['가격'] > 0]
+            chart = alt.Chart(chart_data).mark_bar().encode(
+                x=alt.X('모델', sort=None),
+                y='가격',
+                color=alt.Color('모델', legend=None, scale=alt.Scale(scheme='category10')), 
+                tooltip=['모델', '가격']
+            ).properties(
+                height=300
+            )
+            st.altair_chart(chart, use_container_width=True)
 
-    # 면책 조항
-    st.divider()
-    st.caption("""
-    **[면책 조항]** 본 적정주가 계산기는 S-RIM, 벤저민 그레이엄 등 널리 알려진 투자 대가들의 가치평가 모델을 기반으로 참고용 데이터를 제공합니다. 
-    제공되는 모든 정보는 단순 계산 결과이며, 기업의 질적 가치나 돌발 변수를 반영하지 않습니다. 
-    투자에 대한 모든 판단과 책임은 투자자 본인에게 있습니다.
-    """)
+    # 면책 조항 (수정: 가독성 높임)
+    st.markdown("""
+    <div class="disclaimer-box">
+        <b>[면책 조항]</b><br>
+        본 적정주가 계산기는 S-RIM, 벤저민 그레이엄 등 널리 알려진 투자 대가들의 가치평가 모델을 기반으로 참고용 데이터를 제공합니다. 
+        제공되는 모든 정보는 단순 계산 결과이며, 기업의 질적 가치나 돌발 변수를 반영하지 않습니다. 
+        <b>투자에 대한 모든 판단과 책임은 투자자 본인에게 있습니다.</b>
+    </div>
+    """, unsafe_allow_html=True)
 
 else:
     # 초기 화면 안내
