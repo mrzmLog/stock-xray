@@ -3,16 +3,16 @@ import FinanceDataReader as fdr
 import pandas as pd
 import requests
 import numpy as np
-import re  # 정규표현식 추가 (날짜 인식 강화)
+import re
 
 # -----------------------------------------------------------
 # 페이지 설정
 # -----------------------------------------------------------
 st.set_page_config(page_title="Info Nomad 적정주가 리포트", page_icon="📑", layout="wide")
 
-# 스타일 커스텀
 st.markdown("""
 <style>
+    /* 가독성 강화 스타일 */
     .big-font { font-size: 1.1rem !important; }
     .metric-card {
         background-color: #f8f9fa;
@@ -40,7 +40,7 @@ st.caption("Annual Data Basis | Powered by Info Nomad")
 # -----------------------------------------------------------
 with st.expander("📘 분석 모델 및 데이터 기준 설명 (열기)", expanded=False):
     st.markdown("""
-    - **데이터 기준:** 네이버 금융의 **'최근 연간 실적'**만 사용합니다. (분기 데이터 제외)
+    - **데이터 기준:** 네이버 금융의 **'최근 연간 실적'**만 사용합니다. (분기 데이터 자동 제외)
     - **예상치(E) 활용:** 증권사 컨센서스(예상치)가 있는 경우 미래 가치를 우선 반영합니다.
     - **S-RIM:** 자산가치(BPS) + 초과이익가치(ROE). (이익이 꾸준한 우량주용)
     - **벤저민 그레이엄:** BPS와 EPS의 기하평균. (자산가치 중시)
@@ -57,7 +57,7 @@ def get_stock_list():
     return df_krx[['Search_Name', 'Code', 'Name']]
 
 # -----------------------------------------------------------
-# [기능 3] 데이터 크롤링 (로직 강화)
+# [기능 3] 데이터 크롤링 (지능형 컬럼 파싱 적용)
 # -----------------------------------------------------------
 @st.cache_data(ttl=600) 
 def get_stock_analysis(code):
@@ -75,38 +75,63 @@ def get_stock_analysis(code):
                 break
         
         if financials is None:
-            return None, "재무제표 테이블을 찾을 수 없습니다."
+            return None, "재무 데이터를 찾을 수 없습니다."
 
         # ---------------------------------------------------
-        # 컬럼 정리 및 날짜 인식 (Regex 적용)
+        # [핵심 로직] MultiIndex 컬럼 지능형 정리
         # ---------------------------------------------------
-        # MultiIndex 처리
         if isinstance(financials.columns, pd.MultiIndex):
-            financials.columns = [col[-1] for col in financials.columns]
+            new_columns = []
+            drop_indices = []
+            
+            for i, col_tuple in enumerate(financials.columns):
+                # 1. '분기'가 포함된 컬럼은 무조건 삭제 리스트에 추가
+                if any("분기" in str(x) for x in col_tuple):
+                    drop_indices.append(i)
+                    continue
+                
+                # 2. 날짜(YYYY.MM) 혹은 (E)가 있는 부분을 찾아 헤더로 사용
+                date_part = None
+                for part in col_tuple:
+                    if re.search(r'20\d{2}\.\d{2}', str(part)) or "(E)" in str(part):
+                        date_part = part
+                        break
+                
+                if date_part:
+                    new_columns.append(date_part)
+                else:
+                    # 날짜가 없으면 라벨 컬럼(주요재무정보 등)으로 간주
+                    new_columns.append("Descriptor")
+            
+            # 분기 데이터 삭제
+            financials = financials.drop(financials.columns[drop_indices], axis=1)
+            # 새 컬럼명 적용
+            financials.columns = new_columns
         
-        # '분기' 컬럼 삭제
-        cols_to_keep = [c for c in financials.columns if "분기" not in str(c)]
-        financials = financials[cols_to_keep]
+        else:
+            # 단일 인덱스일 경우도 '분기' 포함 컬럼 삭제
+            cols_to_drop = [c for c in financials.columns if "분기" in str(c)]
+            financials = financials.drop(columns=cols_to_drop)
 
-        # 인덱스 설정
-        financials = financials.set_index(financials.columns[0])
-        
-        # [수정됨] 유효한 연간 컬럼 필터링 (YYYY.MM 패턴 인식)
-        # 예: 2023.12, 2024.03(3월결산), 2025.12(E) 모두 통과
-        valid_cols = []
-        for c in financials.columns:
-            # 정규표현식: 20으로 시작하고 숫자2개 + 점(.) + 숫자2개 패턴이 있는지 확인
-            if re.search(r'20\d{2}\.\d{2}', str(c)):
-                valid_cols.append(c)
+        # ---------------------------------------------------
+        # 데이터 정제
+        # ---------------------------------------------------
+        # 첫 번째 컬럼을 인덱스로 설정 (주요재무정보)
+        if "Descriptor" in financials.columns:
+            financials = financials.set_index("Descriptor")
+        else:
+            financials = financials.set_index(financials.columns[0])
+
+        # 유효한 연간 컬럼만 필터링 (날짜 패턴이 있는 것만)
+        valid_cols = [c for c in financials.columns if re.search(r'20\d{2}\.\d{2}', str(c))]
         
         if not valid_cols:
-            # 디버깅용: 어떤 컬럼들이 있었는지 에러 메시지에 표시
-            return None, f"연간 실적 데이터를 식별할 수 없습니다. (발견된 컬럼: {list(financials.columns)})"
+            return None, f"연간 실적 데이터를 식별할 수 없습니다. (헤더 파싱 실패)"
             
         financials = financials[valid_cols]
 
         # ---------------------------------------------------
-        # 기준 연도 선정
+        # 기준 연도(Target Year) 선정
         # ---------------------------------------------------
         target_col = valid_cols[-1] 
         is_estimate = "(E)" in target_col or "E" in target_col
@@ -118,18 +143,20 @@ def get_stock_analysis(code):
         history_df = financials.loc[financials.index.str.contains('|'.join(key_indices), na=False)]
         
         # ---------------------------------------------------
-        # 값 추출 함수
+        # 값 추출 함수 (결측치 처리 강화)
         # ---------------------------------------------------
         def get_val(row_key, col_name):
             try:
                 row = financials.loc[financials.index.str.contains(row_key, na=False)]
                 if row.empty: return 0
                 val = row[col_name].iloc[0]
-                # 결측치 처리 (직전 연도 데이터 사용 시도)
-                if pd.isna(val) or val == '' or val == '-':
+                
+                # 데이터가 없거나 '-' 인 경우 직전 연도 데이터 사용 시도
+                if pd.isna(val) or str(val).strip() in ['-', '', 'nan']:
                     prev_idx = valid_cols.index(col_name) - 1
                     if prev_idx >= 0:
                         val = row[valid_cols[prev_idx]].iloc[0]
+                
                 return float(str(val).replace(',', ''))
             except:
                 return 0
@@ -140,12 +167,11 @@ def get_stock_analysis(code):
         per = get_val('PER', target_col)
         
         # ---------------------------------------------------
-        # 성장률 (CAGR)
+        # 성장률 (CAGR) 계산
         # ---------------------------------------------------
         eps_growth_rate = 0
         try:
             start_col = valid_cols[0]
-            # 정규표현식으로 연도 추출 (20xx)
             start_year = int(re.search(r'20\d{2}', str(start_col)).group())
             end_year = int(re.search(r'20\d{2}', str(target_col)).group())
             years = end_year - start_year
@@ -180,7 +206,7 @@ def get_stock_analysis(code):
         return None, f"오류 발생: {str(e)}"
 
 # -----------------------------------------------------------
-# [UI Helper] 표 포맷팅
+# [UI Helper] 표 포맷팅 (단위 적용)
 # -----------------------------------------------------------
 def format_financial_table(df):
     formatted_df = df.copy()
@@ -194,14 +220,19 @@ def format_financial_table(df):
                 
                 val_float = float(str(val).replace(',', ''))
                 
-                if '매출액' in idx or '영업이익' in idx or '당기순이익' in idx:
-                    if '율' not in idx: 
+                # 인덱스 이름(idx)을 기준으로 단위 적용
+                idx_clean = idx.replace(' ', '') # 공백 제거 후 비교
+                
+                if '매출액' in idx_clean or '영업이익' in idx_clean or '당기순이익' in idx_clean:
+                    if '율' not in idx_clean: # 영업이익률 제외
                         formatted_df.loc[idx, col] = f"{val_float:,.0f} 억"
-                elif '율' in idx or 'ROE' in idx:
+                    else:
+                        formatted_df.loc[idx, col] = f"{val_float:.2f} %"
+                elif '율' in idx_clean or 'ROE' in idx_clean:
                     formatted_df.loc[idx, col] = f"{val_float:.2f} %"
-                elif 'EPS' in idx or 'BPS' in idx:
+                elif 'EPS' in idx_clean or 'BPS' in idx_clean:
                     formatted_df.loc[idx, col] = f"{val_float:,.0f} 원"
-                elif 'PER' in idx or 'PBR' in idx:
+                elif 'PER' in idx_clean or 'PBR' in idx_clean:
                     formatted_df.loc[idx, col] = f"{val_float:.2f} 배"
                 else:
                     formatted_df.loc[idx, col] = f"{val_float:,.2f}"
