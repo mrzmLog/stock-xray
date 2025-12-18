@@ -265,7 +265,8 @@ def format_financial_table(df):
                 val_float = float(str(val).replace(',', ''))
                 idx_clean = idx.replace(' ', '') 
                 
-                if '율' in idx_clean or 'ROE' in idx_clean:
+                # [수정] '율' 또는 '률' 또는 'ROE'가 포함되면 % 적용
+                if '율' in idx_clean or '률' in idx_clean or 'ROE' in idx_clean:
                     formatted_df.loc[idx, col] = f"{val_float:.2f} %"
                 elif '매출액' in idx_clean or '영업이익' in idx_clean or '당기순이익' in idx_clean:
                      formatted_df.loc[idx, col] = f"{val_float:,.0f} 억"
