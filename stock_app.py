@@ -1,164 +1,153 @@
 import streamlit as st
-import yfinance as yf
+import FinanceDataReader as fdr
 import pandas as pd
-import time
+import requests
 
 # -----------------------------------------------------------
-# 페이지 기본 설정
+# 페이지 설정
 # -----------------------------------------------------------
-st.set_page_config(
-    page_title="Info Nomad 주식 X-Ray",
-    page_icon="📈",
-    layout="wide"
-)
+st.set_page_config(page_title="Info Nomad 한국주식 분석기", page_icon="🇰🇷", layout="wide")
 
 # -----------------------------------------------------------
-# [함수] 데이터 가져오기 (실패 시 None 반환)
+# [함수] 네이버 금융 크롤링 (재무 데이터)
 # -----------------------------------------------------------
-@st.cache_data(ttl=600, show_spinner=False)
-def get_stock_data_auto(ticker_symbol):
+@st.cache_data(ttl=600) 
+def get_naver_stock_info(code):
     try:
-        stock = yf.Ticker(ticker_symbol)
+        # 1. 네이버 금융 메인 페이지 접속
+        url = f"https://finance.naver.com/item/main.naver?code={code}"
         
-        # 1. 가격 정보 (필수)
-        # fast_info가 차단 확률이 낮음
-        if hasattr(stock, 'fast_info'):
-            current_price = stock.fast_info.last_price
-            currency = stock.fast_info.currency
-        else:
-            # history로 재시도
-            hist = stock.history(period='1d')
-            if hist.empty: return None
-            current_price = hist['Close'].iloc[-1]
-            currency = "KRW" # 추정
-
-        # 2. 재무 정보 (여기서 에러가 자주 남 -> 실패하면 수동 모드로 유도)
-        info = stock.info
+        # 봇 탐지 방지용 헤더
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124 Safari/537.36'}
+        response = requests.get(url, headers=headers)
         
-        name = info.get('longName', ticker_symbol)
-        bps = info.get('bookValue', 0)
-        eps = info.get('trailingEps', 0)
-        roe = info.get('returnOnEquity', 0)
-        per = info.get('trailingPE', 0)
-        peg = info.get('pegRatio', 0)
+        # 2. pandas로 HTML 내의 표(Table) 읽기
+        dfs = pd.read_html(response.text)
+        
+        # 3. 데이터 추출 (네이버 페이지 구조에 맞춰 파싱)
+        # 통상적으로 '주요재무제표'는 3번째 혹은 4번째 테이블에 있음
+        financials = None
+        for df in dfs:
+            if '최근 연간 실적' in str(df.columns) or '매출액' in str(df.iloc[:,0]):
+                financials = df
+                break
+        
+        if financials is None:
+            return None, "재무제표 테이블을 찾을 수 없습니다."
 
+        # 데이터 정리 (최근 결산 기준 - 보통 맨 오른쪽이 최신 추정치거나 작년 확정치)
+        # 네이버 금융 표 구조: [매출액, 영업이익, ..., ROE, PER, BPS, EPS ...]
+        financials = financials.set_index(financials.columns[0])
+        
+        # 최근 4분기 혹은 작년 확정치 가져오기 (빗금/Null 처리)
+        # 안전하게 뒤에서 두번째 열(최근 확정 실적)을 가져오는 로직
+        target_col_index = -1 
+        
+        # 필요한 지표 추출 함수
+        def get_value(row_name):
+            try:
+                # 행 이름이 포함된 줄을 찾음
+                row_data = financials.loc[financials.index.str.contains(row_name, na=False)]
+                if row_data.empty: return 0
+                
+                # 값 추출 (문자열 등 처리)
+                val = row_data.iloc[0, target_col_index]
+                if pd.isna(val): # 최신 예측치가 없으면 전년도 데이터 사용
+                    val = row_data.iloc[0, target_col_index - 1]
+                    
+                return float(str(val).replace(',', ''))
+            except:
+                return 0
+
+        roe = get_value('ROE')
+        eps = get_value('EPS')
+        bps = get_value('BPS')
+        per = get_value('PER')
+        pbr = get_value('PBR')
+        
+        # 현재가 가져오기 (FDR 이용)
+        df_price = fdr.DataReader(code)
+        if df_price.empty:
+            return None, "주가 정보를 가져올 수 없습니다."
+        current_price = df_price['Close'].iloc[-1]
+        
+        # 종목명은 별도로 가져오거나 사용자 입력 신뢰
+        # 여기서는 편의상 코드 그대로 사용하거나 별도 API 필요하지만, 
+        # KRX 목록을 미리 받아두는건 무거우므로 생략하고 진행
+        
         return {
-            "success": True,
-            "name": name,
-            "currency": currency,
-            "current_price": current_price,
-            "bps": bps,
-            "eps": eps,
+            "price": current_price,
             "roe": roe,
+            "eps": eps,
+            "bps": bps,
             "per": per,
-            "peg": peg
-        }
+            "pbr": pbr
+        }, None
 
-    except Exception:
-        return None # 실패 신호
-
-# -----------------------------------------------------------
-# [함수] 적정주가 계산 로직 (공통 사용)
-# -----------------------------------------------------------
-def calculate_value(current_price, eps, bps, roe):
-    # 그레이엄
-    graham = 0
-    if eps > 0 and bps > 0:
-        graham = (22.5 * eps * bps) ** 0.5
-    
-    # S-RIM (요구수익률 8%)
-    srim = 0
-    if roe and bps > 0:
-        srim = bps * (roe / 0.08)
-        
-    return graham, srim
+    except Exception as e:
+        return None, f"네이버 접속 중 오류: {str(e)}"
 
 # -----------------------------------------------------------
 # [UI] 화면 구성
 # -----------------------------------------------------------
-st.title("📈 AI 주식 X-Ray 분석기")
-st.markdown("#### :blue[워런 버핏과 사경인의 눈으로] 종목을 진단합니다.")
+st.title("🇰🇷 한국주식 적정주가 분석기 (Naver 기반)")
+st.caption("네이버 금융 데이터를 기반으로 S-RIM과 그레이엄 모델을 분석합니다.")
 
-with st.expander("🔍 사용법 및 티커 입력 가이드", expanded=True):
+with st.expander("🔍 사용법 (티커 대신 숫자 코드만 입력하세요)", expanded=True):
     st.write("""
-    - **한국 주식:** `005930.KS`(삼성전자), `247540.KQ`(에코프로비엠)
-    - **미국 주식:** `AAPL`(애플), `TSLA`(테슬라)
-    - **알림:** 데이터 자동 수집이 지연될 경우, **수동 입력창**이 자동으로 열립니다.
+    - **입력 방법:** 종목코드 6자리를 입력하세요.
+    - **삼성전자:** `005930`
+    - **에코프로비엠:** `247540`
+    - **카카오:** `035720`
     """)
 
-ticker = st.text_input("종목 코드(Ticker) 입력:", placeholder="예: 005930.KS")
+code = st.text_input("종목코드 입력 (6자리):", placeholder="예: 005930")
 
-# 변수 초기화
-data = None
-manual_mode = False
+if code and len(code) == 6:
+    with st.spinner('네이버 금융에서 데이터를 가져오는 중...'):
+        data, error = get_naver_stock_info(code)
 
-if ticker:
-    ticker = ticker.strip().upper()
-    
-    # 1. 자동 수집 시도
-    with st.spinner('데이터 분석 중...'):
-        data = get_stock_data_auto(ticker)
-    
-    # 2. 실패 시 수동 모드 활성화
-    if data is None:
-        st.warning("⚠️ 접속량이 많아 데이터를 자동으로 불러오지 못했습니다. **아래에 수치를 직접 입력해주세요.**")
-        manual_mode = True
-        
-        # 수동 입력 폼
+    if error:
+        st.error(f"⚠️ {error}")
+    elif data:
+        # 계산 로직
+        graham = 0
+        if data['eps'] > 0 and data['bps'] > 0:
+            graham = (22.5 * data['eps'] * data['bps']) ** 0.5
+            
+        srim = 0
+        req_return = 0.08 # 요구수익률 8%
+        if data['roe'] and data['bps'] > 0:
+            srim = data['bps'] * (data['roe'] / 100 / req_return) # ROE가 10.5 형태라서 100 나눔
+
+        # 결과 표시
         st.divider()
-        st.subheader("📝 데이터 수동 입력")
+        st.subheader(f"📊 종목코드 {code} 분석 결과")
+        
         c1, c2, c3, c4 = st.columns(4)
-        in_price = c1.number_input("현재 주가", value=0)
-        in_eps = c2.number_input("EPS (주당순이익)", value=0)
-        in_bps = c3.number_input("BPS (주당순자산)", value=0)
-        in_roe = c4.number_input("ROE (예: 0.15)", value=0.0, format="%.2f")
-        
-        if st.button("분석 결과 보기"):
-            data = {
-                "success": True,
-                "name": ticker,
-                "currency": "User Input",
-                "current_price": in_price,
-                "eps": in_eps,
-                "bps": in_bps,
-                "roe": in_roe,
-                "per": 0, "peg": 0 # 수동 입력에선 생략
-            }
-    
-    # 3. 결과 리포트 출력 (자동 or 수동 성공 시)
-    if data and data['success']:
-        # 계산 실행
-        graham, srim = calculate_value(data['current_price'], data['eps'], data['bps'], data['roe'])
+        c1.metric("현재 주가", f"{data['price']:,.0f}원")
+        c2.metric("ROE", f"{data['roe']}%")
+        c3.metric("EPS", f"{data['eps']:,.0f}원")
+        c4.metric("BPS", f"{data['bps']:,.0f}원")
         
         st.divider()
-        st.subheader(f"📊 {data['name']} 분석 결과")
         
-        # 차트 데이터
+        # 차트
         chart_df = pd.DataFrame({
-            "구분": ["현재 주가", "그레이엄 가치", "S-RIM 가치"],
-            "가격": [data['current_price'], graham, srim]
+            "모델": ["현재 주가", "그레이엄 적정가", "S-RIM 적정가"],
+            "가격": [data['price'], graham, srim]
         })
         chart_df = chart_df[chart_df['가격'] > 0]
         
-        if not chart_df.empty:
-            st.bar_chart(chart_df.set_index("구분"))
-            
-        # 상세 코멘트
-        st.subheader("💡 투자 인사이트")
+        st.bar_chart(chart_df.set_index("모델"))
         
-        # S-RIM
+        # 코멘트
+        st.subheader("💡 투자 포인트")
         if srim > 0:
-            diff = (data['current_price'] - srim) / srim * 100
+            diff = (data['price'] - srim) / srim * 100
             if diff < 0:
-                st.success(f"✅ **S-RIM 저평가:** 적정가({srim:,.0f})보다 **{abs(diff):.1f}%** 쌉니다.")
+                st.success(f"✅ S-RIM 기준 적정가({srim:,.0f}원) 대비 **{abs(diff):.1f}% 저평가** 상태입니다.")
             else:
-                st.warning(f"⚠️ **S-RIM 고평가:** 적정가({srim:,.0f})보다 **{diff:.1f}%** 비쌉니다.")
-        elif manual_mode:
-            st.info("ROE와 BPS를 입력하면 S-RIM 적정가를 계산해드립니다.")
-            
-        # 그레이엄
-        if graham > 0:
-             if data['current_price'] < graham:
-                 st.write(f"- **그레이엄 모델:** 가치({graham:,.0f}) 대비 저평가 상태입니다.")
-             else:
-                 st.write(f"- **그레이엄 모델:** 가치({graham:,.0f}) 대비 고평가 상태입니다.")
+                st.warning(f"⚠️ S-RIM 기준 적정가({srim:,.0f}원) 대비 **{diff:.1f}% 고평가** 상태입니다.")
+        else:
+             st.info("ROE가 너무 낮거나 적자 기업이라 S-RIM 계산이 어렵습니다.")
