@@ -498,4 +498,4 @@ if selected_stock:
     """, unsafe_allow_html=True)
 
 else:
-    st.info("👆 상단의 **'종목 선택 및 설정'**을 눌러 분석할 종목을 검색해주세요.")
+    st.info("👆 상단의 '종목 선택 및 설정'을 눌러 분석할 종목을 검색해주세요.")
