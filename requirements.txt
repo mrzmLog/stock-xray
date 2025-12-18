@@ -1,2 +1,6 @@
 streamlit
-yfinance>=0.2.40
+finance-datareader
+beautifulsoup4
+lxml
+requests
+pandas
