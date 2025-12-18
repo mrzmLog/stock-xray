@@ -6,28 +6,63 @@ import numpy as np
 import re
 
 # -----------------------------------------------------------
-# 페이지 설정
+# [1] 페이지 및 스타일 설정 (모바일 최적화 & 가독성)
 # -----------------------------------------------------------
 st.set_page_config(page_title="Info Nomad 적정주가 리포트", page_icon="📑", layout="wide")
 
 st.markdown("""
 <style>
-    /* 가독성 강화 스타일 */
-    .big-font { font-size: 1.1rem !important; }
-    .metric-card {
-        background-color: #f8f9fa;
-        padding: 20px;
-        border-radius: 10px;
-        border: 1px solid #dee2e6;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        margin-bottom: 10px;
+    /* 전체 폰트 가독성 향상 */
+    html, body, [class*="css"] {
+        font-family: 'Pretendard', sans-serif;
+        font-size: 1.05rem; /* 기본 폰트 키움 */
     }
-    .metric-label { font-size: 0.9rem; color: #6c757d; font-weight: 600; }
-    .metric-value { font-size: 1.1rem; color: #212529; font-weight: 700; }
-    thead tr th {
-        background-color: #e9ecef !important;
-        font-weight: bold !important;
-        color: #495057 !important;
+    
+    /* 제목 스타일 */
+    h1 { font-size: 2.2rem !important; font-weight: 800 !important; color: #111; }
+    h3 { font-size: 1.6rem !important; font-weight: 700 !important; margin-top: 30px !important; }
+    h5 { font-size: 1.3rem !important; font-weight: 600 !important; color: #444; }
+
+    /* 메트릭 카드 (모바일 반응형) */
+    .metric-card {
+        background-color: #ffffff;
+        padding: 20px;
+        border-radius: 12px;
+        border: 1px solid #e0e0e0;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        margin-bottom: 15px;
+        height: 100%; /* 높이 맞춤 */
+    }
+    .metric-label { font-size: 0.95rem; color: #666; margin-bottom: 5px; }
+    .metric-value { font-size: 1.25rem; color: #000; font-weight: 800; }
+    .metric-sub { font-size: 0.85rem; color: #888; margin-top: 5px; }
+
+    /* 결과 박스 강조 */
+    .result-box-success {
+        background-color: #e6f9ed;
+        border: 1px solid #b7ebc5;
+        color: #1f7a38;
+        padding: 15px;
+        border-radius: 10px;
+        font-weight: bold;
+    }
+    .result-box-warning {
+        background-color: #fff8e6;
+        border: 1px solid #ffeeba;
+        color: #997404;
+        padding: 15px;
+        border-radius: 10px;
+        font-weight: bold;
+    }
+    
+    /* 팁 박스 */
+    .tip-box {
+        background-color: #f8f9fa;
+        border-left: 4px solid #007bff;
+        padding: 15px;
+        margin-top: 10px;
+        font-size: 0.95rem;
+        color: #555;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -36,19 +71,19 @@ st.title("📑 Info Nomad 적정주가 리포트")
 st.caption("Annual Data Basis | Powered by Info Nomad")
 
 # -----------------------------------------------------------
-# [기능 1] 모델 설명
+# [2] 기능: 분석 모델 설명
 # -----------------------------------------------------------
 with st.expander("📘 분석 모델 및 데이터 기준 설명 (열기)", expanded=False):
     st.markdown("""
-    - **데이터 기준:** 네이버 금융의 **'최근 연간 실적'**만 사용합니다. (분기 데이터 자동 제외)
-    - **예상치(E) 활용:** 증권사 컨센서스(예상치)가 있는 경우 미래 가치를 우선 반영합니다.
-    - **S-RIM:** 자산가치(BPS) + 초과이익가치(ROE). (이익이 꾸준한 우량주용)
-    - **벤저민 그레이엄:** BPS와 EPS의 기하평균. (자산가치 중시)
-    - **피터 린치 (PEG):** 연간 EPS 성장률(CAGR) 기반. (성장주용)
+    - **데이터 기준:** 네이버 금융의 **'최근 연간 실적'**만 사용합니다. (분기 제외)
+    - **예상치(E):** 증권사 컨센서스가 있는 경우 미래 가치를 우선 반영합니다.
+    - **S-RIM:** 자산(BPS) + 초과이익(ROE). (이익이 꾸준한 우량주용)
+    - **벤저민 그레이엄:** 청산가치(BPS)와 수익가치(EPS)의 균형. (가치주용)
+    - **피터 린치(PEG):** 이익 성장 속도(CAGR) 기반. (성장주용)
     """)
 
 # -----------------------------------------------------------
-# [기능 2] 주식 리스트
+# [3] 기능: 주식 리스트 및 데이터 크롤링
 # -----------------------------------------------------------
 @st.cache_data
 def get_stock_list():
@@ -56,9 +91,6 @@ def get_stock_list():
     df_krx['Search_Name'] = df_krx['Name'] + " (" + df_krx['Code'] + ")"
     return df_krx[['Search_Name', 'Code', 'Name']]
 
-# -----------------------------------------------------------
-# [기능 3] 데이터 크롤링 (지능형 컬럼 파싱 적용)
-# -----------------------------------------------------------
 @st.cache_data(ttl=600) 
 def get_stock_analysis(code):
     try:
@@ -69,7 +101,6 @@ def get_stock_analysis(code):
         
         financials = None
         for df in dfs:
-            # '최근 연간 실적' 혹은 '매출액'이 포함된 메인 재무제표 찾기
             if '매출액' in str(df.iloc[:,0]) or '최근 연간 실적' in str(df.columns):
                 financials = df
                 break
@@ -77,86 +108,54 @@ def get_stock_analysis(code):
         if financials is None:
             return None, "재무 데이터를 찾을 수 없습니다."
 
-        # ---------------------------------------------------
-        # [핵심 로직] MultiIndex 컬럼 지능형 정리
-        # ---------------------------------------------------
+        # 컬럼 정리
         if isinstance(financials.columns, pd.MultiIndex):
             new_columns = []
             drop_indices = []
-            
             for i, col_tuple in enumerate(financials.columns):
-                # 1. '분기'가 포함된 컬럼은 무조건 삭제 리스트에 추가
                 if any("분기" in str(x) for x in col_tuple):
                     drop_indices.append(i)
                     continue
-                
-                # 2. 날짜(YYYY.MM) 혹은 (E)가 있는 부분을 찾아 헤더로 사용
                 date_part = None
                 for part in col_tuple:
                     if re.search(r'20\d{2}\.\d{2}', str(part)) or "(E)" in str(part):
                         date_part = part
                         break
-                
-                if date_part:
-                    new_columns.append(date_part)
-                else:
-                    # 날짜가 없으면 라벨 컬럼(주요재무정보 등)으로 간주
-                    new_columns.append("Descriptor")
+                new_columns.append(date_part if date_part else "Descriptor")
             
-            # 분기 데이터 삭제
             financials = financials.drop(financials.columns[drop_indices], axis=1)
-            # 새 컬럼명 적용
             financials.columns = new_columns
-        
         else:
-            # 단일 인덱스일 경우도 '분기' 포함 컬럼 삭제
             cols_to_drop = [c for c in financials.columns if "분기" in str(c)]
             financials = financials.drop(columns=cols_to_drop)
 
-        # ---------------------------------------------------
-        # 데이터 정제
-        # ---------------------------------------------------
-        # 첫 번째 컬럼을 인덱스로 설정 (주요재무정보)
         if "Descriptor" in financials.columns:
             financials = financials.set_index("Descriptor")
         else:
             financials = financials.set_index(financials.columns[0])
 
-        # 유효한 연간 컬럼만 필터링 (날짜 패턴이 있는 것만)
         valid_cols = [c for c in financials.columns if re.search(r'20\d{2}\.\d{2}', str(c))]
-        
         if not valid_cols:
-            return None, f"연간 실적 데이터를 식별할 수 없습니다. (헤더 파싱 실패)"
+            return None, f"연간 실적 식별 실패"
             
         financials = financials[valid_cols]
-
-        # ---------------------------------------------------
-        # 기준 연도(Target Year) 선정
-        # ---------------------------------------------------
         target_col = valid_cols[-1] 
         is_estimate = "(E)" in target_col or "E" in target_col
 
-        # ---------------------------------------------------
-        # 히스토리 데이터 추출
-        # ---------------------------------------------------
+        # 히스토리 데이터
         key_indices = ['매출액', '영업이익', '당기순이익', '영업이익률', '부채비율', 'ROE', 'EPS', 'BPS', 'PER', 'PBR']
         history_df = financials.loc[financials.index.str.contains('|'.join(key_indices), na=False)]
         
-        # ---------------------------------------------------
-        # 값 추출 함수 (결측치 처리 강화)
-        # ---------------------------------------------------
+        # 값 추출 헬퍼
         def get_val(row_key, col_name):
             try:
                 row = financials.loc[financials.index.str.contains(row_key, na=False)]
                 if row.empty: return 0
                 val = row[col_name].iloc[0]
-                
-                # 데이터가 없거나 '-' 인 경우 직전 연도 데이터 사용 시도
                 if pd.isna(val) or str(val).strip() in ['-', '', 'nan']:
                     prev_idx = valid_cols.index(col_name) - 1
                     if prev_idx >= 0:
                         val = row[valid_cols[prev_idx]].iloc[0]
-                
                 return float(str(val).replace(',', ''))
             except:
                 return 0
@@ -166,16 +165,13 @@ def get_stock_analysis(code):
         bps = get_val('BPS', target_col)
         per = get_val('PER', target_col)
         
-        # ---------------------------------------------------
-        # 성장률 (CAGR) 계산
-        # ---------------------------------------------------
+        # CAGR
         eps_growth_rate = 0
         try:
             start_col = valid_cols[0]
             start_year = int(re.search(r'20\d{2}', str(start_col)).group())
             end_year = int(re.search(r'20\d{2}', str(target_col)).group())
             years = end_year - start_year
-            
             if years > 0:
                 eps_start = get_val('EPS', start_col)
                 eps_end = get_val('EPS', target_col)
@@ -184,7 +180,6 @@ def get_stock_analysis(code):
         except:
             eps_growth_rate = 0
 
-        # 현재가
         df_price = fdr.DataReader(code)
         if df_price.empty: return None, "주가 정보 오류"
         current_price = df_price['Close'].iloc[-1]
@@ -206,7 +201,7 @@ def get_stock_analysis(code):
         return None, f"오류 발생: {str(e)}"
 
 # -----------------------------------------------------------
-# [UI Helper] 표 포맷팅 (단위 적용)
+# [4] 표 포맷팅 (단위 오류 수정: % 우선 적용)
 # -----------------------------------------------------------
 def format_financial_table(df):
     formatted_df = df.copy()
@@ -219,17 +214,13 @@ def format_financial_table(df):
                     continue
                 
                 val_float = float(str(val).replace(',', ''))
+                idx_clean = idx.replace(' ', '') 
                 
-                # 인덱스 이름(idx)을 기준으로 단위 적용
-                idx_clean = idx.replace(' ', '') # 공백 제거 후 비교
-                
-                if '매출액' in idx_clean or '영업이익' in idx_clean or '당기순이익' in idx_clean:
-                    if '율' not in idx_clean: # 영업이익률 제외
-                        formatted_df.loc[idx, col] = f"{val_float:,.0f} 억"
-                    else:
-                        formatted_df.loc[idx, col] = f"{val_float:.2f} %"
-                elif '율' in idx_clean or 'ROE' in idx_clean:
+                # 순서 중요: '율'이나 'ROE'가 있으면 먼저 % 처리
+                if '율' in idx_clean or 'ROE' in idx_clean:
                     formatted_df.loc[idx, col] = f"{val_float:.2f} %"
+                elif '매출액' in idx_clean or '영업이익' in idx_clean or '당기순이익' in idx_clean:
+                     formatted_df.loc[idx, col] = f"{val_float:,.0f} 억"
                 elif 'EPS' in idx_clean or 'BPS' in idx_clean:
                     formatted_df.loc[idx, col] = f"{val_float:,.0f} 원"
                 elif 'PER' in idx_clean or 'PBR' in idx_clean:
@@ -241,25 +232,50 @@ def format_financial_table(df):
     return formatted_df
 
 # -----------------------------------------------------------
-# 사이드바
+# [5] 분석 인사이트 생성기 (자동 코멘트)
+# -----------------------------------------------------------
+def get_analysis_comment(model_name, fair_value, current_price, required_return=None):
+    if fair_value <= 0:
+        return "데이터 부족 또는 적자로 인해 계산할 수 없습니다."
+    
+    diff = (current_price - fair_value) / fair_value * 100
+    
+    if abs(diff) < 10:
+        return "현재 주가는 적정가치와 비슷한 수준(**적정**)입니다."
+    
+    if diff > 0: # 고평가 (현재가가 더 비쌈)
+        if model_name == "S-RIM":
+            if required_return and required_return > 10:
+                 return f"요구수익률({required_return}%)이 높아 적정가가 보수적으로 산출되었습니다."
+            return "현재 주가에 **미래 성장 기대감(프리미엄)**이 반영되어 있습니다."
+        elif model_name == "그레이엄":
+            return "보수적인 청산가치 관점에서는 다소 **고평가** 상태입니다."
+        else:
+            return "펀더멘털 대비 주가가 높게 형성되어 있습니다."
+            
+    else: # 저평가 (현재가가 더 쌈)
+        if diff < -30:
+            return "기업 가치 대비 **현저한 저평가** 구간입니다. (안전마진 확보)"
+        return "적정 가치보다 **저렴한** 상태입니다."
+
+# -----------------------------------------------------------
+# [UI] 사이드바 및 메인
 # -----------------------------------------------------------
 st.sidebar.header("🔍 종목 검색")
 try:
-    with st.spinner("리스트 로딩 중..."):
+    with st.spinner("리스트 로딩..."):
         stock_list = get_stock_list()
     selected_stock = st.sidebar.selectbox(
         "종목 선택", stock_list['Search_Name'], index=None, placeholder="종목명 입력"
     )
 except:
-    st.sidebar.error("목록 로딩 실패")
+    st.sidebar.error("로딩 실패")
     selected_stock = None
 
 st.sidebar.divider()
 st.sidebar.header("🎛 S-RIM 설정")
 srim_option = st.sidebar.radio(
-    "요구수익률(k):",
-    ("BBB- 회사채 (8.0%)", "한국주식 평균 (10.0%)", "국채 금리 (4.0%)", "직접 입력"),
-    index=0
+    "요구수익률(k):", ("BBB- 회사채 (8.0%)", "한국주식 평균 (10.0%)", "국채 금리 (4.0%)", "직접 입력"), index=0
 )
 if "8.0%" in srim_option: default_k = 8.0
 elif "10.0%" in srim_option: default_k = 10.0
@@ -267,21 +283,17 @@ elif "4.0%" in srim_option: default_k = 4.0
 else: default_k = 8.0
 required_return = st.sidebar.slider("상세 조정 (%)", 2.0, 20.0, default_k, 0.1)
 
-# -----------------------------------------------------------
-# 메인 로직
-# -----------------------------------------------------------
 if selected_stock:
     code = selected_stock.split('(')[-1].replace(')', '')
     stock_name = selected_stock.split('(')[0]
 
-    with st.spinner(f"'{stock_name}' 연간 실적 데이터 분석 중..."):
+    with st.spinner(f"'{stock_name}' 연간 실적 분석 중..."):
         data, error = get_stock_analysis(code)
 
     if error:
         st.error(error)
-        st.info("💡 팁: 최근 상장주이거나 ETF/ETN 종목은 재무제표 형식이 달라 분석이 어려울 수 있습니다.")
     elif data:
-        # 계산 로직
+        # 계산
         srim = 0
         if data['bps'] > 0:
             excess_return_value = data['bps'] * (data['roe'] - required_return) / 100 
@@ -301,88 +313,105 @@ if selected_stock:
         st.markdown(f"#### 현재 주가: :blue[{data['price']:,.0f}원]")
         st.divider()
 
-        # 섹션 1
+        # [섹션 1] 실적 표 (모바일 대응: dataframe 사용)
         st.markdown("##### 1️⃣ 최근 연간 실적 흐름")
+        st.caption("※ 모바일에서는 표를 좌우로 밀어서 확인하세요.")
         display_df = format_financial_table(data['history_df'])
-        st.table(display_df)
+        
+        # st.table 대신 st.dataframe 사용 (반응형 스크롤 지원)
+        st.dataframe(display_df, use_container_width=True)
+        
         if data['is_estimate']:
-            st.caption(f"※ '{data['target_year']}' 데이터는 증권사 예상치(Consensus)입니다.")
+            st.info(f"💡 **참고:** '{data['target_year']}' 데이터는 증권사 **예상치(Consensus)**입니다.")
 
         st.divider()
 
-        # 섹션 2
+        # [섹션 2] 적정주가 리포트
         st.markdown(f"##### 2️⃣ 적정주가 산출 리포트 (기준: {data['target_year']})")
         
-        # S-RIM
-        with st.container():
-            st.markdown(f"**① S-RIM (사경인 모델)**")
-            col1, col2 = st.columns([1, 1.5])
-            with col1:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-label">입력 데이터</div>
-                    <div>• BPS: <b>{data['bps']:,.0f}원</b></div>
-                    <div>• ROE: <b>{data['roe']}%</b></div>
-                    <div>• 요구수익률: <b>{required_return}%</b></div>
-                </div>
-                """, unsafe_allow_html=True)
-            with col2:
-                valuation = f"{srim:,.0f}원" if srim > 0 else "N/A"
-                diff_text = f"({(data['price'] - srim)/srim*100:+.1f}%)" if srim > 0 else ""
-                st.success(f"👉 적정주가: **{valuation}** {diff_text}")
-                st.info(f"산출식: $BPS + \\frac{{BPS \\times (ROE - {required_return}\\%)}}{{{required_return}\\%}}$")
+        # 공통 스타일 함수
+        def draw_report_card(title, inputs, result_value, formula, comment):
+            with st.container():
+                st.markdown(f"**{title}**")
+                c1, c2 = st.columns([1, 1.2]) # 모바일에서도 적절한 비율
+                
+                with c1:
+                    input_html = "".join([f"<div>• {k}: <b>{v}</b></div>" for k, v in inputs.items()])
+                    st.markdown(f"""
+                    <div class="metric-card">
+                        <div class="metric-label">입력 데이터</div>
+                        {input_html}
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with c2:
+                    res_cls = "result-box-success" if "저평가" in comment or "저렴" in comment else "result-box-warning"
+                    if result_value <= 0: res_cls = "result-box-warning"
+                    
+                    val_str = f"{result_value:,.0f}원" if result_value > 0 else "계산 불가"
+                    
+                    st.markdown(f"""
+                    <div class="{res_cls}">
+                        <div style="font-size:0.9rem; color:#555;">적정주가</div>
+                        <div style="font-size:1.4rem;">{val_str}</div>
+                    </div>
+                    <div class="tip-box">
+                        <b>🤖 분석 의견:</b><br>{comment}
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                with st.expander("수식 보기"):
+                    st.latex(formula)
+                st.write("") # 간격
 
-        # 그레이엄
-        with st.container():
-            st.markdown(f"**② 벤저민 그레이엄 (NCAV)**")
-            col1, col2 = st.columns([1, 1.5])
-            with col1:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-label">입력 데이터</div>
-                    <div>• EPS: <b>{data['eps']:,.0f}원</b></div>
-                    <div>• BPS: <b>{data['bps']:,.0f}원</b></div>
-                    <div>• 상수: <b>22.5</b></div>
-                </div>
-                """, unsafe_allow_html=True)
-            with col2:
-                valuation = f"{graham:,.0f}원" if graham > 0 else "계산 불가"
-                st.success(f"👉 적정주가: **{valuation}**")
-                st.info(r"산출식: $\sqrt{22.5 \times EPS \times BPS}$")
+        # S-RIM 출력
+        srim_inputs = {
+            "BPS": f"{data['bps']:,.0f}원",
+            "ROE": f"{data['roe']}%",
+            "요구수익률": f"{required_return}%"
+        }
+        srim_comment = get_analysis_comment("S-RIM", srim, data['price'], required_return)
+        draw_report_card("① S-RIM (사경인 모델)", srim_inputs, srim, 
+                         r"BPS + \frac{BPS \times (ROE - k)}{k}", srim_comment)
 
-        # 피터 린치
-        with st.container():
-            st.markdown(f"**③ 피터 린치 (PEG)**")
-            col1, col2 = st.columns([1, 1.5])
-            with col1:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-label">입력 데이터</div>
-                    <div>• EPS: <b>{data['eps']:,.0f}원</b></div>
-                    <div>• 성장률: <b>{data['eps_growth']:.1f}%</b></div>
-                    <div style="color:#999; font-size:0.8em;">(Max 30% 제한)</div>
-                </div>
-                """, unsafe_allow_html=True)
-            with col2:
-                valuation = f"{peter_lynch:,.0f}원" if peter_lynch > 0 else "계산 불가"
-                st.success(f"👉 적정주가: **{valuation}**")
-                st.info(r"산출식: $EPS \times Growth Rate$")
+        # 그레이엄 출력
+        graham_inputs = {
+            "EPS": f"{data['eps']:,.0f}원",
+            "BPS": f"{data['bps']:,.0f}원",
+            "상수": "22.5"
+        }
+        graham_comment = get_analysis_comment("그레이엄", graham, data['price'])
+        draw_report_card("② 벤저민 그레이엄 (NCAV)", graham_inputs, graham, 
+                         r"\sqrt{22.5 \times EPS \times BPS}", graham_comment)
+
+        # 피터 린치 출력
+        lynch_inputs = {
+            "EPS": f"{data['eps']:,.0f}원",
+            "성장률": f"{data['eps_growth']:.1f}%",
+            "비고": "Max 30% 제한"
+        }
+        lynch_comment = get_analysis_comment("PEG", peter_lynch, data['price'])
+        draw_report_card("③ 피터 린치 (PEG)", lynch_inputs, peter_lynch, 
+                         r"EPS \times Growth Rate", lynch_comment)
 
         st.divider()
 
-        # 섹션 3
+        # [섹션 3] 최종 요약
         st.markdown("##### 3️⃣ 최종 결론")
         summary = pd.DataFrame({
             "모델": ["현재 주가", "S-RIM", "그레이엄", "피터 린치"],
-            "적정 주가": [data['price'], srim if srim > 0 else 0, graham if graham > 0 else 0, peter_lynch if peter_lynch > 0 else 0]
+            "가격": [data['price'], srim if srim > 0 else 0, graham if graham > 0 else 0, peter_lynch if peter_lynch > 0 else 0]
         })
-        chart_data = summary[summary['적정 주가'] > 0].set_index("모델")
         
-        c_left, c_right = st.columns([1, 1.5])
+        # 차트용
+        chart_data = summary[summary['가격'] > 0].set_index("모델")
+        
+        c_left, c_right = st.columns([1, 1])
         with c_left:
-            summary_display = summary.copy()
-            summary_display['적정 주가'] = summary_display['적정 주가'].apply(lambda x: f"{x:,.0f}원" if x > 0 else "-")
-            st.table(summary_display)
+             # 테이블용 포맷팅
+            summary_disp = summary.copy()
+            summary_disp['가격'] = summary_disp['가격'].apply(lambda x: f"{x:,.0f}원" if x > 0 else "-")
+            st.dataframe(summary_disp, hide_index=True, use_container_width=True)
         with c_right:
             st.bar_chart(chart_data)
 
