@@ -113,7 +113,7 @@ st.title("🧮 적정주가 산출 계산기")
 st.caption("Last Updated : 2025. 12 | Powered by info Nomad")
 
 # -----------------------------------------------------------
-# [1] 수정사항 반영: 설명 부분 (expander) 복구
+# [1] 모델 설명
 # -----------------------------------------------------------
 with st.expander("📘 분석 모델 및 데이터 기준 설명 (열기)", expanded=False):
     st.markdown("""
@@ -125,7 +125,7 @@ with st.expander("📘 분석 모델 및 데이터 기준 설명 (열기)", expa
     """)
 
 # -----------------------------------------------------------
-# [2] 기능: 주식 리스트 및 데이터 크롤링
+# [2] 데이터 크롤링 함수
 # -----------------------------------------------------------
 @st.cache_data
 def get_stock_list():
@@ -250,7 +250,7 @@ def get_stock_analysis(code):
         return None, f"오류 발생: {str(e)}"
 
 # -----------------------------------------------------------
-# [3] 표 포맷팅 (수정사항 반영: 영업이익률 % 단위 수정)
+# [3] 표 포맷팅
 # -----------------------------------------------------------
 def format_financial_table(df):
     formatted_df = df.copy()
@@ -265,7 +265,6 @@ def format_financial_table(df):
                 val_float = float(str(val).replace(',', ''))
                 idx_clean = idx.replace(' ', '') 
                 
-                # [중요 수정] '율'이 들어간 것을 가장 먼저 체크
                 if '율' in idx_clean or 'ROE' in idx_clean:
                     formatted_df.loc[idx, col] = f"{val_float:.2f} %"
                 elif '매출액' in idx_clean or '영업이익' in idx_clean or '당기순이익' in idx_clean:
@@ -281,7 +280,7 @@ def format_financial_table(df):
     return formatted_df
 
 # -----------------------------------------------------------
-# [4] 분석 인사이트 생성기 (HTML bold 적용)
+# [4] 분석 인사이트
 # -----------------------------------------------------------
 def get_analysis_comment(model_name, fair_value, current_price, required_return=None):
     if fair_value <= 0:
@@ -303,7 +302,7 @@ def get_analysis_comment(model_name, fair_value, current_price, required_return=
         return "적정 가치보다 <b>저렴한</b> 상태입니다."
 
 # -----------------------------------------------------------
-# [5] UI 구성
+# [5] UI: 상단 검색 및 설정 (들여쓰기 수정 완료)
 # -----------------------------------------------------------
 with st.expander("🔍 종목 선택 및 설정 (여기를 클릭하여 종목을 검색하세요)", expanded=True):
     col_input1, col_input2 = st.columns([1, 1])
@@ -325,10 +324,12 @@ with st.expander("🔍 종목 선택 및 설정 (여기를 클릭하여 종목�
             ("BBB- 회사채 (8.0%)", "한국주식 평균 (10.0%)", "국채 금리 (4.0%)", "직접 입력"), 
             index=0, horizontal=True
         )
+        # [수정] 들여쓰기 라인 정렬 완료
         if "8.0%" in srim_option: default_k = 8.0
         elif "10.0%" in srim_option: default_k = 10.0
-elif "4.0%" in srim_option: default_k = 4.0
+        elif "4.0%" in srim_option: default_k = 4.0
         else: default_k = 8.0
+        
         required_return = st.slider("요구수익률 상세 조정 (%)", 2.0, 20.0, default_k, 0.1)
 
 # -----------------------------------------------------------
@@ -382,7 +383,6 @@ if selected_stock:
         display_df = format_financial_table(data['history_df'])
         st.dataframe(display_df, use_container_width=True)
         if data['is_estimate']:
-            # 수정사항: 마크다운 ** 제거하고 HTML bold 적용
             st.markdown(f"<div style='font-size:0.9rem; color:#555;'>💡 참고: '<b>{data['target_year']}</b>' 데이터는 증권사 <b>예상치(Consensus)</b>입니다.</div>", unsafe_allow_html=True)
 
         st.divider()
@@ -395,7 +395,6 @@ if selected_stock:
             c1, c2 = st.columns([1, 1.2])
             
             with c1:
-                # 수정사항: $ 기호 제거
                 input_html = "".join([f"<div>• {k}: <b>{v}</b></div>" for k, v in inputs.items()])
                 st.markdown(f"""
                 <div class="metric-card">
@@ -423,7 +422,7 @@ if selected_stock:
                 st.latex(formula)
             st.write("") 
 
-        # S-RIM (수정: $ 기호 제거)
+        # S-RIM
         srim_inputs = {
             "BPS (BPS)": f"{data['bps']:,.0f}원",
             "ROE (ROE)": f"{data['roe']}%",
@@ -433,7 +432,7 @@ if selected_stock:
         draw_report_card("① S-RIM (사경인 모델)", srim_inputs, srim, 
                          r"BPS + \frac{BPS \times (ROE - k)}{k}", srim_comment)
 
-        # 그레이엄 (수정: $ 기호 제거)
+        # 그레이엄
         graham_inputs = {
             "EPS (EPS)": f"{data['eps']:,.0f}원",
             "BPS (BPS)": f"{data['bps']:,.0f}원",
@@ -443,7 +442,7 @@ if selected_stock:
         draw_report_card("② 벤저민 그레이엄 (NCAV)", graham_inputs, graham, 
                          r"\sqrt{22.5 \times EPS \times BPS}", graham_comment)
 
-        # 피터 린치 (수정: $ 기호 제거)
+        # 피터 린치
         lynch_inputs = {
             "EPS (EPS)": f"{data['eps']:,.0f}원",
             "성장률 (G)": f"{data['eps_growth']:.1f}%",
@@ -455,7 +454,7 @@ if selected_stock:
 
         st.divider()
 
-        # [섹션 3] 최종 요약 (수정: 표 디자인 개선, 차트 배치)
+        # [섹션 3] 최종 요약
         st.markdown("##### 3️⃣ 최종 결론")
         
         summary = pd.DataFrame({
@@ -463,15 +462,12 @@ if selected_stock:
             "가격": [data['price'], srim if srim > 0 else 0, graham if graham > 0 else 0, peter_lynch if peter_lynch > 0 else 0]
         })
         
-        # 1. 표 (HTML로 직접 그려서 이쁘게)
         summary_disp = summary.copy()
         summary_disp['가격'] = summary_disp['가격'].apply(lambda x: f"{x:,.0f}원" if x > 0 else "-")
         
-        # columns 사용: PC에선 옆으로, 모바일에선 위아래로
         c_final1, c_final2 = st.columns([1, 1])
         
         with c_final1:
-            # HTML Table 생성
             table_html = "<table class='final-table'><thead><tr><th>모델</th><th>적정 주가</th></tr></thead><tbody>"
             for index, row in summary_disp.iterrows():
                 table_html += f"<tr><td>{row['모델']}</td><td>{row['가격']}</td></tr>"
@@ -479,7 +475,6 @@ if selected_stock:
             st.markdown(table_html, unsafe_allow_html=True)
             
         with c_final2:
-            # 2. 차트 (항목별 색상 다르게)
             chart_data = summary[summary['가격'] > 0]
             chart = alt.Chart(chart_data).mark_bar().encode(
                 x=alt.X('모델', sort=None),
@@ -491,7 +486,7 @@ if selected_stock:
             )
             st.altair_chart(chart, use_container_width=True)
 
-    # 면책 조항 (수정: 가독성 높임)
+    # 면책 조항
     st.markdown("""
     <div class="disclaimer-box">
         <b>[면책 조항]</b><br>
@@ -502,5 +497,4 @@ if selected_stock:
     """, unsafe_allow_html=True)
 
 else:
-    # 초기 화면 안내
     st.info("👆 상단의 **'종목 선택 및 설정'**을 눌러 분석할 종목을 검색해주세요.")
